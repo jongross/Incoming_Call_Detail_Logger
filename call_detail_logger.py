@@ -1,10 +1,12 @@
+## convert file to python 3 compatible, and reformat to pass a python lint check
+
 ##------------------------------------------
 ##--- Author: Pradeep Singh
 ##--- Blog: https://iotbytes.wordpress.com/incoming-call-details-logger-with-raspberry-pi/
 ##--- Date: 12 Jan 2018
 ##--- Version: 1.0
 ##--- Python Ver: 2.7
-##--- Description: This python code will log all the incomming call details in MySQL DB using an analog Modem connected with Raspberry Pi
+##--- Description: This python code will log all the incoming call details in MySQL DB using an analog Modem connected with Raspberry Pi
 ##------------------------------------------
 
 
@@ -19,6 +21,7 @@ import os.path
 from flask import Flask, request, session, g, redirect, url_for, \
      abort, render_template, flash, send_from_directory, jsonify
 from werkzeug.local import LocalProxy
+import sys
 
 
 #=================================================================
@@ -64,29 +67,30 @@ def detect_COM_port():
 
     # List all the Serial COM Ports on Raspberry Pi
     proc = subprocess.Popen(['ls /dev/tty[A-Za-z]*'], shell=True, stdout=subprocess.PIPE)
-    com_ports = proc.communicate()[0]
+    com_ports = proc.communicate()[0].decode('utf-8')
     com_ports_list = com_ports.split('\n')
 
     # Find the right port associated with the Voice Modem
     for com_port in com_ports_list:
         if 'tty' in com_port:
-            #Try to open the COM Port and execute AT Command
+            # Try to open the COM Port and execute AT Command
             try:
                 # Set the COM Port Settings
                 set_COM_port_settings(com_port)
                 analog_modem.open()
-            except:
-                print "Unable to open COM Port: " + com_port
+            except Exception as e:
+                print("Unable to open COM Port: " + com_port)
+                print(e)
                 pass
             else:
-                #Try to put Modem in Voice Mode
+                # Try to put Modem in Voice Mode
                 if not exec_AT_cmd("AT+FCLASS=8", "OK"):
-                    print "Error: Failed to put modem into voice mode."
+                    print("Error: Failed to put modem into voice mode.")
                     if analog_modem.isOpen():
                         analog_modem.close()
                 else:
                     # Found the COM Port exit the loop
-                    print "Modem COM Port is: " + com_port
+                    print("Modem COM Port is: " + com_port)
                     analog_modem.flushInput()
                     analog_modem.flushOutput()
                     break
@@ -102,42 +106,44 @@ def init_modem_settings():
     # Detect and Open the Modem Serial COM Port
     try:
         detect_COM_port()
-    except:
-        print "Error: Unable to open the Serial Port."
+    except Exception as e:
+        print("Error: Unable to open the Serial Port.")
+        print(e)
         sys.exit()
 
     # Initialize the Modem
     try:
-        # Flush any existing input outout data from the buffers
+        # Flush any existing input output data from the buffers
         analog_modem.flushInput()
         analog_modem.flushOutput()
 
         # Test Modem connection, using basic AT command.
         if not exec_AT_cmd("AT"):
-            print "Error: Unable to access the Modem"
+            print("Error: Unable to access the Modem")
 
-        # reset to factory default.
+        # Reset to factory default.
         if not exec_AT_cmd("ATZ3"):
-            print "Error: Unable reset to factory default"          
+            print("Error: Unable reset to factory default")          
             
         # Display result codes in verbose form  
         if not exec_AT_cmd("ATV1"):
-            print "Error: Unable set response in verbose form"  
+            print("Error: Unable set response in verbose form")  
 
         # Enable Command Echo Mode.
         if not exec_AT_cmd("ATE1"):
-            print "Error: Failed to enable Command Echo Mode"       
+            print("Error: Failed to enable Command Echo Mode")       
 
         # Enable formatted caller report.
         if not exec_AT_cmd("AT+VCID=1"):
-            print "Error: Failed to enable formatted caller report."
+            print("Error: Failed to enable formatted caller report.")
             
         # Flush any existing input outout data from the buffers
         analog_modem.flushInput()
         analog_modem.flushOutput()
 
-    except:
-        print "Error: unable to Initialize the Modem"
+    except Exception as e:
+        print("Error: unable to Initialize the Modem")
+        print(e)
         sys.exit()
 #=================================================================
 
@@ -161,9 +167,10 @@ def exec_AT_cmd(modem_AT_cmd, expected_response="OK"):
         # Return command execution status
         return execution_status
 
-    except:
+    except Exception as e:
         disable_modem_event_listener = False
-        print "Error: Failed to execute the command"
+        print("Error: Failed to execute the command")
+        print(e)
         return False        
 #=================================================================
 
@@ -180,10 +187,10 @@ def read_AT_cmd_response(expected_response="OK"):
     MODEM_RESPONSE_READ_TIMEOUT = 10 # Tine in Seconds
 
     try:
-        while 1:
+        while True:
             # Read Modem Data on Serial Rx Pin
-            modem_response = analog_modem.readline()
-            print modem_response
+            modem_response = analog_modem.readline().decode('utf-8')
+            print(modem_response)
             # Recieved expected Response
             if expected_response == modem_response.strip(' \t\n\r' + chr(16)):
                 return True
@@ -194,8 +201,9 @@ def read_AT_cmd_response(expected_response="OK"):
             elif (datetime.now()-start_time).seconds > MODEM_RESPONSE_READ_TIMEOUT:
                 return False
 
-    except:
-        print "Error in read_modem_response function..."
+    except Exception as e:
+        print("Error in read_modem_response function...")
+        print(e)
         return False
 #=================================================================
 
@@ -211,12 +219,12 @@ def monitor_modem_line():
     # Call detail dictionary
     call_record = {}
 
-    while 1:
+    while True:
         if not disable_modem_event_listener:
-            modem_data = analog_modem.readline()
+            modem_data = analog_modem.readline().decode('utf-8')
             
             if modem_data != "":
-                print modem_data
+                print(modem_data)
 
                 if ("DATE" in modem_data):
                     call_record['DATE'] = (modem_data[5:]).strip(' \t\n\r')
@@ -225,7 +233,7 @@ def monitor_modem_line():
                 if ("NMBR" in modem_data):
                     call_record['NMBR'] = (modem_data[5:]).strip(' \t\n\r')
                     # Call call details logger
-                    print call_record
+                    print(call_record)
                     call_details_logger(call_record)
 
                 if "RING" in modem_data.strip(chr(16)):
@@ -243,8 +251,9 @@ def close_modem_port():
         if analog_modem.isOpen():
             analog_modem.close()
             print ("Serial Port closed...")
-    except:
-        print "Error: Unable to close the Serial Port."
+    except Exception as e:
+        print("Error: Unable to close the Serial Port.")
+        print(e)
         sys.exit()
 #=================================================================
 
@@ -288,7 +297,7 @@ def init_call_history_DB():
     curs.close()
     conn.close()
 
-    print "SQLite3 Database initialized successfully"
+    print("SQLite3 Database initialized successfully")
 #=================================================================
 
 
@@ -301,7 +310,7 @@ def call_details_logger(call_record):
         query = 'INSERT INTO Call_Details(Phone_Number, Modem_Date, Modem_Time, System_Date_Time) VALUES(?,?,?,?)'
         arguments = [call_record['NMBR'], datetime.strptime(call_record['DATE'],'%m%d').strftime('%d-%b'), datetime.strptime(call_record['TIME'],'%H%M').strftime('%I:%M %p'), (datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3])]
         insert_record(query, arguments)
-        print "New record added"
+        print("New record added")
 #=================================================================
 
 
@@ -360,9 +369,9 @@ def call_details():
 
 
 #=================================================================
-# If SQLite DB doesn't exists create it.
+# If SQLite DB doesn't exist, create it.
 if not os.path.isfile(DB_NAME):
-    print "SQLite3 DB doesn't exists. Trying to create DB..."
+    print("SQLite3 DB doesn't exist. Trying to create DB...")
     init_call_history_DB()
 
 # Main Function
