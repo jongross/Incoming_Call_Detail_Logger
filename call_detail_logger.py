@@ -38,6 +38,12 @@ disable_modem_event_listener = True
 
 # SQLite3 DB to Store Call Details
 DB_NAME = 'Call_History.db'
+
+# DyanmoDB Table Name
+DYNAMODB_TABLE_NAME = 'phonehome'
+
+# default Modem ID
+MODEM_ID = 'CX93001-EIS_V0.2002-V92'
 #=================================================================
 
 
@@ -117,12 +123,20 @@ def init_modem_settings():
         analog_modem.flushInput()
         analog_modem.flushOutput()
 
+        modemid = exec_AT_cmd("ATI3")
+        print("DEBUG: Modem ID: " + modemid)
+        if modemid == False:
+            print("Error: Unable to get Modem ID")
+        else:
+            MODEM_ID = modemid
+            print("Modem ID: " + MODEM_ID)
+            
         # Test Modem connection, using basic AT command.
         if not exec_AT_cmd("AT"):
             print("Error: Unable to access the Modem")
 
         # Reset to factory default.
-        if not exec_AT_cmd("ATZ3"):
+        if not exec_AT_cmd("AT&F"):
             print("Error: Unable reset to factory default")          
             
         # Display result codes in verbose form  
@@ -185,7 +199,8 @@ def read_AT_cmd_response(expected_response="OK"):
     start_time = datetime.now()
 
     MODEM_RESPONSE_READ_TIMEOUT = 10 # Tine in Seconds
-
+    # TODO: when asked for the modemID, we need to capture it and send it to dynamoDB
+    
     try:
         while True:
             # Read Modem Data on Serial Rx Pin
@@ -193,7 +208,8 @@ def read_AT_cmd_response(expected_response="OK"):
             print(modem_response)
             # Recieved expected Response
             if expected_response == modem_response.strip(' \t\n\r' + chr(16)):
-                return True
+                # this is a little hacky, but we need to capture the modemID, and string values are "truthy"...
+                return modem_response.strip(' \t\n\r' + chr(16))
             # Failed to execute the command successfully
             elif "ERROR" in modem_response.strip(' \t\n\r' + chr(16)):
                 return False
@@ -345,6 +361,33 @@ def query_db(query, args=(), one=False):
     return (rv[0] if rv else None) if one else rv
 #=================================================================
 
+#=================================================================
+# App Send to DynamoDB Handler 
+#=================================================================
+def send_to_dynamodb(phone_number, system_date_time):
+    import boto3
+    import json
+
+    # Create a DynamoDB client
+    #session = boto3.Session(profile_name='default')
+    boto3.setup_default_session(profile_name='default')
+    dynamodb = boto3.client('dynamodb')
+
+    # Add a new item
+    item = {
+        'modemID': {'S': MODEM_ID},
+        'PhoneNumber': {'S': phone_number},
+        'modemTime': {'S': datetime.now().isoformat()},
+        'Name': {'S': "jon testing from modem monitoring code"}
+    }
+
+    response = dynamodb.put_item(
+        TableName=DYNAMODB_TABLE_NAME,
+        Item=item
+    )
+
+    print("DynamoDB Response: ")
+    print(response)
 
 
 #=================================================================
@@ -377,6 +420,7 @@ if not os.path.isfile(DB_NAME):
 # Main Function
 init_modem_settings()
 
+send_to_dynamodb('206-706-1224','20250203T12:12:12')
 # Start a new thread to listen to modem data 
 data_listener_thread = threading.Thread(target=monitor_modem_line)
 data_listener_thread.start()
