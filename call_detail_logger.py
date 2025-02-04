@@ -26,9 +26,7 @@ import sys
 
 #=================================================================
 # Global Variables
-#=================================================================
-# USB Modem Name/Manufacturer as shown in "lsusb" command
-MODEM_NAME = 'U.S. Robotics'   
+#=================================================================  
 
 # Global Modem Object
 analog_modem = serial.Serial()
@@ -37,13 +35,18 @@ analog_modem = serial.Serial()
 disable_modem_event_listener = True
 
 # SQLite3 DB to Store Call Details
-DB_NAME = 'Call_History.db'
+DB_NAME = 'call_log.db'
 
 # DyanmoDB Table Name
 DYNAMODB_TABLE_NAME = 'phonehome'
 
-# default Modem ID
+# default Modem ID (this is from a zoom model 3095 USB 56k modem)
 MODEM_ID = 'CX93001-EIS_V0.2002-V92'
+
+# ModemID AT CMD
+# WARNING: This is specific to the zoom 3095, other modems will have different AT commands
+MODEM_ID_AT_CMD = "ATI3"
+
 #=================================================================
 
 
@@ -122,14 +125,6 @@ def init_modem_settings():
         # Flush any existing input output data from the buffers
         analog_modem.flushInput()
         analog_modem.flushOutput()
-
-        modemid = exec_AT_cmd("ATI3")
-        print("DEBUG: Modem ID: " + modemid)
-        if modemid == False:
-            print("Error: Unable to get Modem ID")
-        else:
-            MODEM_ID = modemid
-            print("Modem ID: " + MODEM_ID)
             
         # Test Modem connection, using basic AT command.
         if not exec_AT_cmd("AT"):
@@ -138,7 +133,13 @@ def init_modem_settings():
         # Reset to factory default.
         if not exec_AT_cmd("AT&F"):
             print("Error: Unable reset to factory default")          
-            
+
+        modemid = exec_AT_cmd(MODEM_ID_AT_CMD)
+        if modemid == False:
+            print("Error: Unable to get Modem ID")
+        else:
+            MODEM_ID = modemid
+
         # Display result codes in verbose form  
         if not exec_AT_cmd("ATV1"):
             print("Error: Unable set response in verbose form")  
@@ -298,7 +299,8 @@ def init_call_history_DB():
                          Phone_Number text,
                          Modem_Date text,
                          Modem_Time text,
-                         System_Date_Time text
+                         System_Date_Time text,
+                         Name text
                         );"""
 
     #Connect or Create DB File
@@ -323,9 +325,16 @@ def init_call_history_DB():
 #=================================================================
 def call_details_logger(call_record):
     with app.app_context():
-        query = 'INSERT INTO Call_Details(Phone_Number, Modem_Date, Modem_Time, System_Date_Time) VALUES(?,?,?,?)'
-        arguments = [call_record['NMBR'], datetime.strptime(call_record['DATE'],'%m%d').strftime('%d-%b'), datetime.strptime(call_record['TIME'],'%H%M').strftime('%I:%M %p'), (datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3])]
+        query = 'INSERT INTO Call_Details(Phone_Number, Modem_Date, Modem_Time, System_Date_Time, Name) VALUES(?,?,?,?,?)'
+        arguments = [
+            call_record['NMBR'],
+            datetime.strptime(call_record['DATE'],'%m%d').strftime('%d-%b'),
+            datetime.strptime(call_record['TIME'],'%H%M').strftime('%I:%M %p'),
+            (datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]),
+            (call_record['NAME'] or "Unknown Name")
+        ]
         insert_record(query, arguments)
+        send_to_dynamodb(call_record['NMBR'], call_record['NAME'])
         print("New record added")
 #=================================================================
 
@@ -364,7 +373,7 @@ def query_db(query, args=(), one=False):
 #=================================================================
 # App Send to DynamoDB Handler 
 #=================================================================
-def send_to_dynamodb(phone_number, system_date_time):
+def send_to_dynamodb(phone_number, name):
     import boto3
     import json
 
@@ -378,7 +387,7 @@ def send_to_dynamodb(phone_number, system_date_time):
         'modemID': {'S': MODEM_ID},
         'PhoneNumber': {'S': phone_number},
         'modemTime': {'S': datetime.now().isoformat()},
-        'Name': {'S': "jon testing from modem monitoring code"}
+        'Name': {'S': name}
     }
 
     response = dynamodb.put_item(
